@@ -3,18 +3,23 @@
 """
 RJ DEEP SEARCH - Light Crawler
 Database module (SQLite + aiosqlite)
-- Stores discovered URLs and their status
+- Stores discovered URLs and their metadata
 - Manages a persistent queue for crawling
-- Provides methods to save results, get top scored URLs, and statistics
+- Provides methods to save results, get top scored URLs, statistics, and export data
 """
 
 import time
+import json
+import hashlib
 import aiosqlite
 
 import config   # use external configuration
 
+# Default image URL if none is provided
+DEFAULT_IMAGE_URL = "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png"
+
 # Schema for two tables:
-#   urls  – all URLs encountered, with status, depth, score, etc.
+#   urls  – all URLs encountered, with status, depth, score, title, description, image_url, tags, search_term, etc.
 #   queue – URLs waiting to be processed (FIFO order)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS urls (
@@ -22,6 +27,11 @@ CREATE TABLE IF NOT EXISTS urls (
     status INTEGER DEFAULT 0,   -- 0=new, 1=processing, 2=done, 3=failed
     depth INTEGER DEFAULT 0,
     score REAL DEFAULT 0.0,
+    title TEXT,
+    description TEXT,
+    image_url TEXT,
+    tags TEXT,                  -- JSON array as string
+    search_term TEXT,           -- the search keyword that led to this result
     content_hash TEXT,
     visited_at REAL
 );
@@ -90,11 +100,53 @@ class Database:
         await self.conn.commit()
         return url, depth
 
-    async def mark_processed(self, url, score, content_hash=None):
-        """Mark a URL as successfully processed with a score."""
+    async def mark_processed(self, url, score, content_hash=None, title=None, description=None, image_url=None, tags=None, search_term=None):
+        """
+        Mark a URL as successfully processed with a score.
+        Optionally update metadata fields.
+        If image_url is not provided, use DEFAULT_IMAGE_URL.
+        """
+        if image_url is None:
+            image_url = DEFAULT_IMAGE_URL
+
+        if tags is not None and not isinstance(tags, str):
+            tags = json.dumps(tags)
+
         await self.conn.execute(
-            "UPDATE urls SET status = 2, score = ?, content_hash = ?, visited_at = ? WHERE url = ?",
-            (score, content_hash, time.time(), url)
+            """
+            UPDATE urls
+            SET status = 2,
+                score = ?,
+                content_hash = ?,
+                title = ?,
+                description = ?,
+                image_url = ?,
+                tags = ?,
+                search_term = ?,
+                visited_at = ?
+            WHERE url = ?
+            """,
+            (score, content_hash, title, description, image_url, tags, search_term, time.time(), url)
+        )
+        await self.conn.commit()
+
+    async def add_result(self, url, title, description, image_url, tags, score=0.0, depth=0, search_term=None):
+        """
+        Insert or replace a URL as a processed result with full metadata.
+        This is used for direct results from SearXNG or similar.
+        If image_url is None or empty, use DEFAULT_IMAGE_URL.
+        """
+        if not image_url:
+            image_url = DEFAULT_IMAGE_URL
+
+        tags_json = json.dumps(tags) if tags else None
+        await self.conn.execute(
+            """
+            INSERT OR REPLACE INTO urls
+            (url, status, depth, score, title, description, image_url, tags, search_term, visited_at)
+            VALUES (?, 2, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (url, depth, score, title, description, image_url, tags_json, search_term, time.time())
         )
         await self.conn.commit()
 
@@ -107,10 +159,35 @@ class Database:
         await self.conn.commit()
 
     async def get_top_results(self, limit=50, min_score=0.0):
-        """Return the top scored URLs that have been processed."""
+        """
+        Return the top scored URLs that have been processed.
+        Returns list of tuples: (url, score, depth, title, description, image_url, tags, search_term)
+        """
         async with self.conn.execute(
-            "SELECT url, score, depth FROM urls WHERE status = 2 AND score >= ? ORDER BY score DESC LIMIT ?",
+            """
+            SELECT url, score, depth, title, description, image_url, tags, search_term
+            FROM urls
+            WHERE status = 2 AND score >= ?
+            ORDER BY score DESC
+            LIMIT ?
+            """,
             (min_score, limit)
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return rows
+
+    async def get_all_results(self, min_score=0.0):
+        """
+        Return all processed results with metadata.
+        """
+        async with self.conn.execute(
+            """
+            SELECT url, score, depth, title, description, image_url, tags, search_term
+            FROM urls
+            WHERE status = 2 AND score >= ?
+            ORDER BY score DESC
+            """,
+            (min_score,)
         ) as cursor:
             rows = await cursor.fetchall()
         return rows

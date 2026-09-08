@@ -6,14 +6,18 @@ Main entry point with three modes:
 1. Crawl a pre-defined platform.
 2. Search Common Crawl index.
 3. Search via SearXNG (local metasearch, uses Docker).
+
+In SearXNG mode, results are saved directly to the database with metadata,
+including the search term used for later JSON export.
 """
 
 import asyncio
-import config   # for dynamic settings override
+import config
 import platforms
 from crawler import crawl_platform
 from common_crawl import search_cc_index
 from searxng_search import search_searxng, ensure_searxng_running
+from database import Database
 
 
 def print_banner():
@@ -106,6 +110,48 @@ def ask_crawl_settings():
             print("Invalid input. Keeping previous settings.")
 
 
+async def save_searxng_results_to_db(keyword, results):
+    """
+    Save SearXNG results directly to the database.
+    Each result already contains url, title, description, possibly image_url.
+    We'll compute a simple score based on keyword presence in title/description.
+    The search_term is stored for later JSON export and categorization.
+    """
+    db = Database()
+    await db.connect()
+    saved_count = 0
+    for r in results:
+        url = r.get('url')
+        title = r.get('title') or ''
+        description = r.get('description') or ''
+        image_url = r.get('img_src') or r.get('image') or None
+
+        # Simple scoring: count keyword occurrences in title + description
+        text = (title + ' ' + description).lower()
+        keyword_lower = keyword.lower()
+        hits = text.count(keyword_lower)
+        score = min(100.0, hits * 20.0)  # heuristic
+
+        # Basic tag = keyword
+        tags = [keyword_lower]
+
+        await db.add_result(
+            url=url,
+            title=title,
+            description=description,
+            image_url=image_url,
+            tags=tags,
+            score=score,
+            depth=0,
+            search_term=keyword_lower   # store the original keyword
+        )
+        saved_count += 1
+
+    await db.close()
+    print(f"\n[✓] {saved_count} results saved to database.")
+    return saved_count
+
+
 async def main():
     print_banner()
     mode = choose_mode()
@@ -113,8 +159,9 @@ async def main():
         print("Program stopped.")
         return
 
-    # Ask for crawl settings before any crawling (optional)
-    ask_crawl_settings()
+    if mode == 'platform' or mode == 'commoncrawl':
+        # Ask for crawl settings only for these modes
+        ask_crawl_settings()
 
     if mode == 'platform':
         selected = choose_platform()
@@ -163,22 +210,10 @@ async def main():
             print("No results from SearXNG.")
             return
 
-        # Extract URLs from results
-        urls = [r['url'] for r in results if r.get('url')]
-        if not urls:
-            print("No valid URLs in results.")
-            return
+        # Save directly to database with search term
+        await save_searxng_results_to_db(keyword, results)
 
-        print(f"Found {len(urls)} URLs. Starting crawl...\n")
-        temp_platform = {
-            "name": "SearXNG",
-            "description": f"SearXNG results for '{keyword}'",
-            "seed_urls": urls,
-            "keywords": [keyword.lower()]
-        }
-        await crawl_platform(temp_platform)
-
-    print("\nCrawling finished.")
+    print("\nProcess finished.")
 
 
 if __name__ == "__main__":
