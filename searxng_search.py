@@ -6,6 +6,7 @@ SearXNG metasearch engine integration with Docker management.
 
 This version fetches the HTML results page instead of JSON.
 HTML is parsed with selectolax to extract results.
+Supports pagination (max_pages) to gather more links.
 URLs (both result and image) are stripped of SearXNG proxy/redirect so that
 only the original external URL is stored.
 """
@@ -48,20 +49,20 @@ def ensure_searxng_running():
     Check if Docker is running and the SearXNG container exists and is started.
     Returns True if SearXNG is ready, False otherwise.
     """
-    # Docker CLI check
+    # 1. Check Docker availability
     code, _, _ = _run_command("docker --version")
     if code != 0:
         print("[!] Docker is not installed or not in PATH.")
         print("    Please install Docker Desktop and start it, then run this program again.")
         return False
 
-    # Docker daemon check
+    # 2. Check if Docker daemon is running
     code, _, _ = _run_command("docker info")
     if code != 0:
         print("[!] Docker daemon is not running. Please start Docker Desktop.")
         return False
 
-    # Container check
+    # 3. Check if container exists
     code, stdout, _ = _run_command(f"docker ps -a --filter name=^{CONTAINER_NAME}$ --format {{{{.Names}}}}")
     container_exists = (code == 0 and CONTAINER_NAME in stdout)
 
@@ -72,6 +73,7 @@ def ensure_searxng_running():
             print(f"[!] Failed to create container: {stderr}")
             return False
     else:
+        # 4. Check if container is running
         code, stdout, _ = _run_command(f"docker ps --filter name=^{CONTAINER_NAME}$ --format {{{{.Names}}}}")
         if CONTAINER_NAME not in stdout:
             print(f"[i] Starting existing SearXNG container...")
@@ -80,7 +82,7 @@ def ensure_searxng_running():
                 print(f"[!] Failed to start container: {stderr}")
                 return False
 
-    # Wait for SearXNG to be ready
+    # 5. Wait for SearXNG to be ready
     print("[i] Waiting for SearXNG to become ready...")
     for _ in range(30):
         try:
@@ -120,70 +122,90 @@ def _extract_real_url(raw_url, base=SEARXNG_BASE):
             original = params['url'][0]
             # May be double-encoded
             original = unquote(original)
-            # Sometimes the original URL itself may have query parameters
             return original
         elif 'q' in params and params['q']:
             original = params['q'][0]
             original = unquote(original)
             return original
 
-    # If no proxy pattern, return the absolute URL (which may be localhost for internal links)
+    # If no proxy pattern, return the absolute URL
     return absolute
 
 
-async def search_searxng(query, limit=50):
+async def search_searxng(query, limit=50, max_pages=3):
     """
     Search using local SearXNG instance (HTML output).
-    Returns a list of dicts with keys: 'url', 'title', 'description', 'img_src'.
+    Supports pagination to gather more results.
+
+    Parameters:
+        query     : search term
+        limit     : maximum total results to return
+        max_pages : number of result pages to crawl (starting from 1)
+
+    Returns:
+        list of dicts with keys: 'url', 'title', 'description', 'img_src'
     """
-    params = {
-        "q": query,
-        "categories": "general",
-        "language": "en",
-        "safesearch": 0,
-    }
-    headers = {"User-Agent": USER_AGENT}
-    results = []
+    all_results = []
+    seen_urls = set()  # avoid duplicates within this search
 
-    async with aiohttp.ClientSession(headers=headers) as session:
-        try:
-            async with session.get(SEARXNG_URL, params=params, timeout=15) as response:
-                if response.status != 200:
-                    print(f"SearXNG error: HTTP {response.status}")
-                    return results
-                html = await response.text()
-        except Exception as e:
-            print(f"Error querying SearXNG: {e}")
-            return results
+    for page in range(1, max_pages + 1):
+        params = {
+            "q": query,
+            "categories": "general",
+            "language": "en",
+            "safesearch": 0,
+            "pageno": page,
+        }
+        headers = {"User-Agent": USER_AGENT}
+        page_results = []
 
-    parser = HTMLParser(html)
-    for article in parser.css('article.result, div.result, .result'):
-        title_tag = article.css_first('h3 a')
-        if not title_tag:
-            continue
+        async with aiohttp.ClientSession(headers=headers) as session:
+            try:
+                async with session.get(SEARXNG_URL, params=params, timeout=15) as response:
+                    if response.status != 200:
+                        print(f"SearXNG error on page {page}: HTTP {response.status}")
+                        break
+                    html = await response.text()
+            except Exception as e:
+                print(f"Error on page {page}: {e}")
+                break
 
-        title = title_tag.text(strip=True)
-        raw_url = title_tag.attributes.get('href')
-        if not raw_url:
-            continue
+        parser = HTMLParser(html)
+        for article in parser.css('article.result, div.result, .result'):
+            title_tag = article.css_first('h3 a')
+            if not title_tag:
+                continue
 
-        # Extract original URL from possible redirect
-        url = _extract_real_url(raw_url, SEARXNG_BASE)
+            title = title_tag.text(strip=True)
+            raw_url = title_tag.attributes.get('href')
+            if not raw_url:
+                continue
 
-        desc_tag = article.css_first('p.content, .content, p')
-        description = desc_tag.text(strip=True) if desc_tag else ""
+            url = _extract_real_url(raw_url, SEARXNG_BASE)
+            if url in seen_urls:
+                continue  # skip duplicates within this search
+            seen_urls.add(url)
 
-        img_tag = article.css_first('img')
-        raw_img_src = img_tag.attributes.get('src') if img_tag else None
-        img_src = _extract_real_url(raw_img_src, SEARXNG_BASE) if raw_img_src else None
+            desc_tag = article.css_first('p.content, .content, p')
+            description = desc_tag.text(strip=True) if desc_tag else ""
 
-        results.append({
-            'url': url,
-            'title': title,
-            'description': description,
-            'img_src': img_src
-        })
-        if len(results) >= limit:
+            img_tag = article.css_first('img')
+            raw_img_src = img_tag.attributes.get('src') if img_tag else None
+            img_src = _extract_real_url(raw_img_src, SEARXNG_BASE) if raw_img_src else None
+
+            page_results.append({
+                'url': url,
+                'title': title,
+                'description': description,
+                'img_src': img_src
+            })
+
+        if not page_results:
+            # No more results, stop
             break
 
-    return results
+        all_results.extend(page_results)
+        if len(all_results) >= limit:
+            break
+
+    return all_results[:limit]

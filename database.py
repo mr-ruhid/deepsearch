@@ -6,6 +6,7 @@ Database module (SQLite + aiosqlite)
 - Stores discovered URLs and their metadata
 - Manages a persistent queue for crawling
 - Provides methods to save results, get top scored URLs, statistics, and export data
+- Uses search_results table to track each search session separately and mark new URLs
 """
 
 import time
@@ -21,9 +22,10 @@ DEFAULT_IMAGE_URL = "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link
 # If config doesn't have DB_PATH, use a default value
 DB_PATH = getattr(config, "DB_PATH", "crawler.db")
 
-# Schema for two tables:
-#   urls  – all URLs encountered, with status, depth, score, title, description, image_url, tags, search_term, etc.
-#   queue – URLs waiting to be processed (FIFO order)
+# Schema for tables:
+#   urls           – all unique URLs encountered, with metadata
+#   search_results – association between search sessions and URLs, with is_new flag
+#   queue          – URLs waiting to be processed (FIFO order)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS urls (
     url TEXT PRIMARY KEY,
@@ -38,6 +40,14 @@ CREATE TABLE IF NOT EXISTS urls (
     content_hash TEXT,
     visited_at REAL
 );
+CREATE TABLE IF NOT EXISTS search_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    is_new INTEGER DEFAULT 1,
+    FOREIGN KEY (url) REFERENCES urls (url) ON DELETE CASCADE,
+    UNIQUE(search_id, url)
+);
 CREATE TABLE IF NOT EXISTS queue (
     url TEXT PRIMARY KEY,
     depth INTEGER,
@@ -45,6 +55,7 @@ CREATE TABLE IF NOT EXISTS queue (
 );
 CREATE INDEX IF NOT EXISTS idx_urls_status ON urls(status);
 CREATE INDEX IF NOT EXISTS idx_queue_added ON queue(added_at);
+CREATE INDEX IF NOT EXISTS idx_search_results_search_id ON search_results(search_id);
 """
 
 class Database:
@@ -108,6 +119,8 @@ class Database:
         Mark a URL as successfully processed with a score.
         Optionally update metadata fields.
         If image_url is not provided, use DEFAULT_IMAGE_URL.
+        This method is used for crawler results (platform / Common Crawl).
+        It does NOT write to search_results.
         """
         if image_url is None:
             image_url = DEFAULT_IMAGE_URL
@@ -133,23 +146,56 @@ class Database:
         )
         await self.conn.commit()
 
-    async def add_result(self, url, title, description, image_url, tags, score=0.0, depth=0, search_term=None):
+    async def add_result(self, url, title, description, image_url, tags, score=0.0, depth=0, search_term=None, search_id=None):
         """
         Insert or replace a URL as a processed result with full metadata.
         This is used for direct results from SearXNG or similar.
-        If image_url is None or empty, use DEFAULT_IMAGE_URL.
+
+        Additionally, record the association in search_results:
+        - If URL does not exist in urls, insert it and mark is_new = 1
+        - If URL already exists, only add a search_results entry with is_new = 0
+
+        This ensures the same URL can appear in multiple search sessions
+        without being duplicated in the urls table, and we can distinguish new links.
+
+        Parameters:
+            search_id : required unique identifier for this search session.
         """
         if not image_url:
             image_url = DEFAULT_IMAGE_URL
+        if search_id is None:
+            search_id = "unknown"
+
+        # Check if URL already exists in urls table
+        cursor = await self.conn.execute("SELECT 1 FROM urls WHERE url = ?", (url,))
+        exists = await cursor.fetchone()
+
+        is_new = 0 if exists else 1
 
         tags_json = json.dumps(tags) if tags else None
+
+        if not exists:
+            # Insert new URL into urls table
+            await self.conn.execute(
+                """
+                INSERT INTO urls
+                (url, status, depth, score, title, description, image_url, tags, search_term, visited_at)
+                VALUES (?, 2, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (url, depth, score, title, description, image_url, tags_json, search_term, time.time())
+            )
+        else:
+            # Optionally update existing URL's metadata if desired
+            # For now we leave it as is; can be changed later
+            pass
+
+        # Record in search_results
         await self.conn.execute(
             """
-            INSERT OR REPLACE INTO urls
-            (url, status, depth, score, title, description, image_url, tags, search_term, visited_at)
-            VALUES (?, 2, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO search_results (search_id, url, is_new)
+            VALUES (?, ?, ?)
             """,
-            (url, depth, score, title, description, image_url, tags_json, search_term, time.time())
+            (search_id, url, is_new)
         )
         await self.conn.commit()
 
@@ -164,7 +210,7 @@ class Database:
     async def get_top_results(self, limit=50, min_score=0.0):
         """
         Return the top scored URLs that have been processed.
-        Returns list of tuples: (url, score, depth, title, description, image_url, tags, search_term)
+        This method does not include search_results information.
         """
         async with self.conn.execute(
             """
@@ -181,14 +227,18 @@ class Database:
 
     async def get_all_results(self, min_score=0.0):
         """
-        Return all processed results with metadata.
+        Return all processed results with metadata, including search session info.
+        Joins urls with search_results.
+        Each row: (url, score, depth, title, description, image_url, tags, search_term, search_id, is_new)
         """
         async with self.conn.execute(
             """
-            SELECT url, score, depth, title, description, image_url, tags, search_term
-            FROM urls
-            WHERE status = 2 AND score >= ?
-            ORDER BY score DESC
+            SELECT u.url, u.score, u.depth, u.title, u.description, u.image_url, u.tags,
+                   u.search_term, sr.search_id, sr.is_new
+            FROM search_results sr
+            JOIN urls u ON u.url = sr.url
+            WHERE u.status = 2 AND u.score >= ?
+            ORDER BY u.score DESC
             """,
             (min_score,)
         ) as cursor:

@@ -7,10 +7,15 @@ Main entry point with three modes:
 2. Search Common Crawl index.
 3. Search via SearXNG (local metasearch, uses Docker).
 
-After any mode completes, user can export results to JSON files.
+In SearXNG mode:
+- User can specify limit and number of pages.
+- Each search gets a unique search_id.
+- Results are saved to database, duplicates tracked, new links marked.
+- JSON export can be done after search.
 """
 
 import asyncio
+from datetime import datetime
 import config
 import platforms
 from crawler import crawl_platform
@@ -110,12 +115,12 @@ def ask_crawl_settings():
             print("Invalid input. Keeping previous settings.")
 
 
-async def save_searxng_results_to_db(keyword, results):
+async def save_searxng_results_to_db(keyword, results, search_id):
     """
     Save SearXNG results directly to the database.
     Each result already contains url, title, description, possibly image_url.
-    We'll compute a simple score based on keyword presence in title/description.
-    The search_term is stored for later JSON export and categorization.
+    We compute a simple score based on keyword presence in title/description.
+    The search_term and search_id are stored for later JSON export.
     """
     db = Database()
     await db.connect()
@@ -143,7 +148,8 @@ async def save_searxng_results_to_db(keyword, results):
             tags=tags,
             score=score,
             depth=0,
-            search_term=keyword_lower   # store the original keyword
+            search_term=keyword_lower,
+            search_id=search_id   # unique search session
         )
         saved_count += 1
 
@@ -204,14 +210,25 @@ async def main():
             print("Keyword cannot be empty.")
             return
 
-        print(f"\nSearching via local SearXNG for '{keyword}'...")
-        results = await search_searxng(keyword, limit=50)
+        # User can specify limit and number of pages
+        try:
+            limit = int(input("How many results max? (default 50): ").strip() or "50")
+            max_pages = int(input("How many pages to search? (default 3): ").strip() or "3")
+        except ValueError:
+            print("Invalid input, using defaults (limit=50, pages=3).")
+            limit, max_pages = 50, 3
+
+        # Generate a unique search ID for this session
+        search_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        print(f"\nSearching via local SearXNG for '{keyword}' (limit={limit}, pages={max_pages})...")
+        results = await search_searxng(keyword, limit=limit, max_pages=max_pages)
         if not results:
             print("No results from SearXNG.")
             return
 
-        # Save directly to database with search term
-        await save_searxng_results_to_db(keyword, results)
+        # Save directly to database with search term and search ID
+        await save_searxng_results_to_db(keyword, results, search_id)
 
     # After any mode, ask user if they want to export results to JSON
     print("\nProcess finished.")
