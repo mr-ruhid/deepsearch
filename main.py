@@ -7,8 +7,7 @@ Main entry point with three modes:
 2. Search Common Crawl index.
 3. Search via SearXNG (local metasearch, uses Docker).
 
-In SearXNG mode, results are saved directly to the database with metadata,
-including the search term used for later JSON export.
+After any mode completes, user can export results to JSON files.
 """
 
 import asyncio
@@ -18,6 +17,7 @@ from crawler import crawl_platform
 from common_crawl import search_cc_index
 from searxng_search import search_searxng, ensure_searxng_running
 from database import Database
+from exporter import export_all   # JSON export
 
 
 def print_banner():
@@ -213,7 +213,11 @@ async def main():
         # Save directly to database with search term
         await save_searxng_results_to_db(keyword, results)
 
+    # After any mode, ask user if they want to export results to JSON
     print("\nProcess finished.")
+    export_choice = input("Do you want to export results to JSON? (y/n): ").strip().lower()
+    if export_choice == 'y':
+        await export_all()
 
 
 if __name__ == "__main__":
