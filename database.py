@@ -18,6 +18,9 @@ import config   # use external configuration
 # Default image URL if none is provided
 DEFAULT_IMAGE_URL = "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png"
 
+# If config doesn't have DB_PATH, use a default value
+DB_PATH = getattr(config, "DB_PATH", "crawler.db")
+
 # Schema for two tables:
 #   urls  – all URLs encountered, with status, depth, score, title, description, image_url, tags, search_term, etc.
 #   queue – URLs waiting to be processed (FIFO order)
@@ -46,8 +49,8 @@ CREATE INDEX IF NOT EXISTS idx_queue_added ON queue(added_at);
 
 class Database:
     def __init__(self, db_path=None):
-        # Use path from config if not provided
-        self.db_path = db_path or config.DB_PATH
+        # Use path from config if not provided, else use the module-level DB_PATH
+        self.db_path = db_path or DB_PATH
         self.conn = None
 
     async def connect(self):

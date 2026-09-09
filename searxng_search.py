@@ -4,23 +4,28 @@
 RJ DEEP SEARCH - Light Crawler
 SearXNG metasearch engine integration with Docker management.
 
-This module provides:
-- ensure_searxng_running(): automatically checks and starts the SearXNG Docker container.
-- search_searxng(): sends a query to local SearXNG and returns results.
+This version fetches the HTML results page instead of JSON.
+HTML is parsed with selectolax to extract results.
+Image URLs are converted to absolute URLs and stripped of localhost proxy.
 """
 
 import asyncio
 import subprocess
 import time
 import sys
+from urllib.parse import urljoin, urlparse, parse_qs, unquote
 
 import aiohttp
+from selectolax.parser import HTMLParser
 
 # Configuration
-SEARXNG_URL = "http://localhost:8888/search"
+SEARXNG_BASE = "http://localhost:8888"
+SEARXNG_URL = f"{SEARXNG_BASE}/search"
 CONTAINER_NAME = "searxng"
 IMAGE_NAME = "searxng/searxng"
 PORT_MAPPING = "8888:8080"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 
 def _run_command(cmd):
     """Run a shell command and return (returncode, stdout, stderr)."""
@@ -36,42 +41,23 @@ def _run_command(cmd):
     except Exception as e:
         return -1, "", str(e)
 
+
 def ensure_searxng_running():
     """
-    Check if Docker is running, if the SearXNG container exists and is started.
-    If not, it tries to start/create it.
+    Check if Docker is running and the SearXNG container exists and is started.
     Returns True if SearXNG is ready, False otherwise.
     """
-    # 1. Check Docker availability
     code, _, _ = _run_command("docker --version")
     if code != 0:
         print("[!] Docker is not installed or not in PATH.")
         print("    Please install Docker Desktop and start it, then run this program again.")
-        print("    You may need to run this script as Administrator.")
         return False
 
-    # 2. Check if Docker daemon is running
     code, _, _ = _run_command("docker info")
     if code != 0:
-        print("[!] Docker daemon is not running. Starting Docker Desktop...")
-        # Try to start Docker Desktop (Windows)
-        if sys.platform.startswith("win"):
-            _run_command('start "" "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"')
-            # Wait for Docker daemon to be ready
-            for _ in range(30):
-                time.sleep(2)
-                code, _, _ = _run_command("docker info")
-                if code == 0:
-                    break
-            if code != 0:
-                print("[!] Failed to start Docker automatically.")
-                print("    Please start Docker Desktop manually and re-run.")
-                return False
-        else:
-            print("[!] Please start Docker daemon manually.")
-            return False
+        print("[!] Docker daemon is not running. Please start Docker Desktop.")
+        return False
 
-    # 3. Check if container exists
     code, stdout, _ = _run_command(f"docker ps -a --filter name=^{CONTAINER_NAME}$ --format {{{{.Names}}}}")
     container_exists = (code == 0 and CONTAINER_NAME in stdout)
 
@@ -82,7 +68,6 @@ def ensure_searxng_running():
             print(f"[!] Failed to create container: {stderr}")
             return False
     else:
-        # 4. Check if container is running
         code, stdout, _ = _run_command(f"docker ps --filter name=^{CONTAINER_NAME}$ --format {{{{.Names}}}}")
         if CONTAINER_NAME not in stdout:
             print(f"[i] Starting existing SearXNG container...")
@@ -91,57 +76,100 @@ def ensure_searxng_running():
                 print(f"[!] Failed to start container: {stderr}")
                 return False
 
-    # 5. Wait for SearXNG to be ready
     print("[i] Waiting for SearXNG to become ready...")
-    for _ in range(20):
+    for _ in range(30):
         try:
-            # Simple HTTP request to the main page
-            code, _, _ = _run_command(f"curl -s -o NUL -w \"%{{http_code}}\" {SEARXNG_URL.replace('/search', '')}")
-            if code == 0:
-                # curl exit code 0 means success
-                return True
+            import urllib.request
+            req = urllib.request.Request(SEARXNG_BASE, headers={'User-Agent': USER_AGENT})
+            with urllib.request.urlopen(req, timeout=2) as response:
+                if response.status == 200:
+                    return True
         except:
             pass
         time.sleep(1)
     print("[!] SearXNG did not become ready in time.")
     return False
 
+
+def _extract_original_image_url(raw_src):
+    """
+    If the source is a SearXNG image proxy, extract the original URL from its 'url' query parameter.
+    Otherwise return the source as is.
+    """
+    if not raw_src:
+        return None
+
+    # Check if it's an image_proxy link
+    if '/image_proxy' in raw_src:
+        parsed = urlparse(raw_src)
+        params = parse_qs(parsed.query)
+        if 'url' in params and params['url']:
+            # URL may be double-encoded
+            original = params['url'][0]
+            # Decode percent encoding
+            original = unquote(original)
+            return original
+        else:
+            return raw_src
+    else:
+        return raw_src
+
+
 async def search_searxng(query, limit=50):
     """
-    Search using local SearXNG instance.
-
-    Parameters:
-        query : search term
-        limit : max number of results
-
-    Returns:
-        list of dicts with keys: 'url', 'title', 'description'
+    Search using local SearXNG instance (HTML output).
+    Returns a list of dicts with keys: 'url', 'title', 'description', 'img_src'.
     """
     params = {
         "q": query,
-        "format": "json",
-        "pageno": 1,
         "categories": "general",
         "language": "en",
         "safesearch": 0,
     }
+    headers = {"User-Agent": USER_AGENT}
     results = []
-    async with aiohttp.ClientSession() as session:
+
+    async with aiohttp.ClientSession(headers=headers) as session:
         try:
             async with session.get(SEARXNG_URL, params=params, timeout=15) as response:
                 if response.status != 200:
                     print(f"SearXNG error: HTTP {response.status}")
                     return results
-                data = await response.json()
-                for item in data.get("results", []):
-                    result = {
-                        "url": item.get("url"),
-                        "title": item.get("title"),
-                        "description": item.get("content", "")
-                    }
-                    results.append(result)
-                    if len(results) >= limit:
-                        break
+                html = await response.text()
         except Exception as e:
             print(f"Error querying SearXNG: {e}")
+            return results
+
+    parser = HTMLParser(html)
+    for article in parser.css('article.result, div.result, .result'):
+        title_tag = article.css_first('h3 a')
+        if not title_tag:
+            continue
+
+        title = title_tag.text(strip=True)
+        raw_url = title_tag.attributes.get('href')
+        if not raw_url:
+            continue
+
+        url = urljoin(SEARXNG_BASE, raw_url)
+
+        desc_tag = article.css_first('p.content, .content, p')
+        description = desc_tag.text(strip=True) if desc_tag else ""
+
+        img_tag = article.css_first('img')
+        raw_img_src = img_tag.attributes.get('src') if img_tag else None
+        img_src = _extract_original_image_url(raw_img_src)
+        # Ensure absolute URL if still relative
+        if img_src:
+            img_src = urljoin(SEARXNG_BASE, img_src)
+
+        results.append({
+            'url': url,
+            'title': title,
+            'description': description,
+            'img_src': img_src
+        })
+        if len(results) >= limit:
+            break
+
     return results
