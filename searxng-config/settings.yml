@@ -6,6 +6,8 @@ general:
   instance_name: "RJ Deep Search"
   enable_metrics: false
 
+#search
+
 search:
   safe_search: 0
   autocomplete: ""
@@ -13,6 +15,8 @@ search:
   formats:
     - html
     - json
+
+#server
 
 server:
   secret_key: "rjdeepsearch_secret_key_change_me_12345"
