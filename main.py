@@ -7,11 +7,8 @@ Main entry point with three modes:
 2. Search Common Crawl index.
 3. Search via SearXNG (local metasearch, uses Docker).
 
-In SearXNG mode:
-- User can specify limit and number of pages.
-- Each search gets a unique search_id.
-- Results are saved to database, duplicates tracked, new links marked.
-- JSON export can be done after search.
+After each search, the user can export results to JSON and choose to run
+another search in the same mode without restarting the program.
 """
 
 import asyncio
@@ -22,7 +19,7 @@ from crawler import crawl_platform
 from common_crawl import search_cc_index
 from searxng_search import search_searxng, ensure_searxng_running
 from database import Database
-from exporter import export_all   # JSON export
+from exporter import export_all
 
 
 def print_banner():
@@ -135,7 +132,7 @@ async def save_searxng_results_to_db(keyword, results, search_id):
         text = (title + ' ' + description).lower()
         keyword_lower = keyword.lower()
         hits = text.count(keyword_lower)
-        score = min(100.0, hits * 20.0)  # heuristic
+        score = min(100.0, hits * 20.0)
 
         # Basic tag = keyword
         tags = [keyword_lower]
@@ -149,13 +146,105 @@ async def save_searxng_results_to_db(keyword, results, search_id):
             score=score,
             depth=0,
             search_term=keyword_lower,
-            search_id=search_id   # unique search session
+            search_id=search_id
         )
         saved_count += 1
 
     await db.close()
     print(f"\n[✓] {saved_count} results saved to database.")
     return saved_count
+
+
+async def run_searxng_mode():
+    """Run SearXNG search mode with loop for multiple searches."""
+    print("Checking SearXNG availability...")
+    if not ensure_searxng_running():
+        print("SearXNG is not available. Please check Docker or start it manually.")
+        return
+
+    while True:
+        keyword = input("\nEnter search keyword (or 'q' to quit): ").strip()
+        if keyword.lower() == 'q':
+            break
+        if not keyword:
+            print("Keyword cannot be empty.")
+            continue
+
+        try:
+            limit = int(input("How many results max? (default 50): ").strip() or "50")
+            max_pages = int(input("How many pages to search? (default 3): ").strip() or "3")
+        except ValueError:
+            print("Invalid input, using defaults (limit=50, pages=3).")
+            limit, max_pages = 50, 3
+
+        search_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        print(f"\nSearching via local SearXNG for '{keyword}' (limit={limit}, pages={max_pages})...")
+        results = await search_searxng(keyword, limit=limit, max_pages=max_pages)
+        if not results:
+            print("No results from SearXNG.")
+        else:
+            await save_searxng_results_to_db(keyword, results, search_id)
+
+            export_choice = input("Do you want to export results to JSON? (y/n): ").strip().lower()
+            if export_choice == 'y':
+                await export_all()
+
+        # Ask to continue
+        again = input("\nDo you want to run another search in SearXNG mode? (Enter/y - yes, q - quit): ").strip().lower()
+        if again == 'q':
+            break
+
+
+async def run_platform_mode():
+    """Run platform crawl mode with loop for multiple crawls."""
+    ask_crawl_settings()
+    while True:
+        selected = choose_platform()
+        if selected is None:
+            break
+
+        print(f"\nSelected platform: {selected['name']}")
+        print(f"Description: {selected['description']}")
+        print(f"Seed URLs: {', '.join(selected['seed_urls'])}")
+        print("\nStarting crawl...\n")
+        await crawl_platform(selected)
+
+        export_choice = input("Do you want to export results to JSON? (y/n): ").strip().lower()
+        if export_choice == 'y':
+            await export_all()
+
+        again = input("\nDo you want to crawl another platform? (Enter/y - yes, q - quit): ").strip().lower()
+        if again == 'q':
+            break
+
+
+async def run_commoncrawl_mode():
+    """Run Common Crawl mode with loop for multiple searches."""
+    ask_crawl_settings()
+    while True:
+        keyword, domain = get_common_crawl_settings()
+        print(f"\nSearching Common Crawl for '{keyword}'...")
+        urls = await search_cc_index(keyword, domain, limit=100)
+        if not urls:
+            print("No URLs found from Common Crawl.")
+        else:
+            print(f"Found {len(urls)} URLs. Starting crawl...\n")
+            temp_platform = {
+                "name": "Common Crawl",
+                "description": f"Search results for '{keyword}'",
+                "seed_urls": urls,
+                "keywords": [keyword.lower()]
+            }
+            await crawl_platform(temp_platform)
+
+            export_choice = input("Do you want to export results to JSON? (y/n): ").strip().lower()
+            if export_choice == 'y':
+                await export_all()
+
+        again = input("\nDo you want to run another Common Crawl search? (Enter/y - yes, q - quit): ").strip().lower()
+        if again == 'q':
+            break
 
 
 async def main():
@@ -165,76 +254,14 @@ async def main():
         print("Program stopped.")
         return
 
-    if mode == 'platform' or mode == 'commoncrawl':
-        # Ask for crawl settings only for these modes
-        ask_crawl_settings()
-
     if mode == 'platform':
-        selected = choose_platform()
-        if selected is None:
-            print("Program stopped.")
-            return
-
-        print(f"\nSelected platform: {selected['name']}")
-        print(f"Description: {selected['description']}")
-        print(f"Seed URLs: {', '.join(selected['seed_urls'])}")
-        print("\nStarting crawl...\n")
-        await crawl_platform(selected)
-
+        await run_platform_mode()
     elif mode == 'commoncrawl':
-        keyword, domain = get_common_crawl_settings()
-        print(f"\nSearching Common Crawl for '{keyword}'...")
-        urls = await search_cc_index(keyword, domain, limit=100)
-        if not urls:
-            print("No URLs found from Common Crawl.")
-            return
-
-        print(f"Found {len(urls)} URLs. Starting crawl...\n")
-        temp_platform = {
-            "name": "Common Crawl",
-            "description": f"Search results for '{keyword}'",
-            "seed_urls": urls,
-            "keywords": [keyword.lower()]
-        }
-        await crawl_platform(temp_platform)
-
+        await run_commoncrawl_mode()
     elif mode == 'searxng':
-        # Ensure local SearXNG is running (Docker)
-        print("Checking SearXNG availability...")
-        if not ensure_searxng_running():
-            print("SearXNG is not available. Please check Docker or start it manually.")
-            return
+        await run_searxng_mode()
 
-        keyword = input("Enter search keyword: ").strip()
-        if not keyword:
-            print("Keyword cannot be empty.")
-            return
-
-        # User can specify limit and number of pages
-        try:
-            limit = int(input("How many results max? (default 50): ").strip() or "50")
-            max_pages = int(input("How many pages to search? (default 3): ").strip() or "3")
-        except ValueError:
-            print("Invalid input, using defaults (limit=50, pages=3).")
-            limit, max_pages = 50, 3
-
-        # Generate a unique search ID for this session
-        search_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        print(f"\nSearching via local SearXNG for '{keyword}' (limit={limit}, pages={max_pages})...")
-        results = await search_searxng(keyword, limit=limit, max_pages=max_pages)
-        if not results:
-            print("No results from SearXNG.")
-            return
-
-        # Save directly to database with search term and search ID
-        await save_searxng_results_to_db(keyword, results, search_id)
-
-    # After any mode, ask user if they want to export results to JSON
-    print("\nProcess finished.")
-    export_choice = input("Do you want to export results to JSON? (y/n): ").strip().lower()
-    if export_choice == 'y':
-        await export_all()
+    print("\nProgram finished.")
 
 
 if __name__ == "__main__":
