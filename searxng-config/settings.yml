@@ -1,0 +1,58 @@
+# SearXNG custom settings
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "RJ Deep Search"
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "rjdeepsearch_secret_key_change_me_12345"
+  limiter: false
+  public_instance: false
+  image_proxy: true
+  method: "GET"
+  bind_address: "0.0.0.0"
+  port: 8080
+
+ui:
+  static_use_hash: true
+
+outgoing:
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+  useragent_suffix: ""
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+
+engines:
+  # Disable problematic engines
+  - name: brave
+    disabled: true
+  - name: duckduckgo
+    disabled: true
+  - name: google
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: wikipedia
+    disabled: true
+
+  # Enable reliable engines
+  - name: bing
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: qwant
+    disabled: false
+  - name: wikidata
+    disabled: false
