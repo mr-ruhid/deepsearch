@@ -2,10 +2,11 @@
 
 """
 RJ DEEP SEARCH - Light Crawler
-Main entry point with three modes:
+Main entry point with four modes:
 1. Crawl a pre-defined platform.
 2. Search Common Crawl index.
 3. Search via SearXNG (local metasearch, uses Docker).
+4. Database cleanup.
 
 After each search, the user can export results to JSON and choose to run
 another search in the same mode without restarting the program.
@@ -20,6 +21,14 @@ from common_crawl import search_cc_index
 from searxng_search import search_searxng, ensure_searxng_running
 from database import Database
 from exporter import export_all
+from cleanup import (
+    show_stats,
+    wipe_all,
+    clear_search_results,
+    delete_by_search_id,
+    delete_by_search_term,
+    list_search_ids,
+)
 
 
 def print_banner():
@@ -61,6 +70,7 @@ def choose_mode():
     print("1. Crawl a pre-defined platform")
     print("2. Search Common Crawl index")
     print("3. Search via SearXNG (local metasearch)")
+    print("4. Database cleanup")
     print("q. Quit")
     choice = input("> ").strip().lower()
     if choice == '1':
@@ -69,6 +79,8 @@ def choose_mode():
         return 'commoncrawl'
     elif choice == '3':
         return 'searxng'
+    elif choice == '4':
+        return 'cleanup'
     elif choice == 'q':
         return 'quit'
     else:
@@ -128,13 +140,11 @@ async def save_searxng_results_to_db(keyword, results, search_id):
         description = r.get('description') or ''
         image_url = r.get('img_src') or r.get('image') or None
 
-        # Simple scoring: count keyword occurrences in title + description
         text = (title + ' ' + description).lower()
         keyword_lower = keyword.lower()
         hits = text.count(keyword_lower)
         score = min(100.0, hits * 20.0)
 
-        # Basic tag = keyword
         tags = [keyword_lower]
 
         await db.add_result(
@@ -190,7 +200,6 @@ async def run_searxng_mode():
             if export_choice == 'y':
                 await export_all()
 
-        # Ask to continue
         again = input("\nDo you want to run another search in SearXNG mode? (Enter/y - yes, q - quit): ").strip().lower()
         if again == 'q':
             break
@@ -247,6 +256,46 @@ async def run_commoncrawl_mode():
             break
 
 
+async def run_cleanup_mode():
+    """Interactive cleanup submenu."""
+    while True:
+        print("\n=== Database Cleanup ===")
+        print("1. Show database statistics")
+        print("2. List all search sessions")
+        print("3. Clear entire database (urls + search_results + queue)")
+        print("4. Clear only search_results (keep URLs, useful before re-searching)")
+        print("5. Delete results by search_id")
+        print("6. Delete results by search_term")
+        print("q. Back to main menu")
+        choice = input("> ").strip().lower()
+
+        if choice == '1':
+            await show_stats()
+        elif choice == '2':
+            await list_search_ids()
+        elif choice == '3':
+            confirm = input("Are you sure? This will erase ALL data. (y/n): ").strip().lower()
+            if confirm == 'y':
+                await wipe_all()
+        elif choice == '4':
+            confirm = input("Clear search_results table? URLs will be kept. (y/n): ").strip().lower()
+            if confirm == 'y':
+                await clear_search_results()
+        elif choice == '5':
+            await list_search_ids()
+            sid = input("Enter search_id to delete (or Enter to cancel): ").strip()
+            if sid:
+                await delete_by_search_id(sid)
+        elif choice == '6':
+            term = input("Enter search_term (keyword) to delete (or Enter to cancel): ").strip()
+            if term:
+                await delete_by_search_term(term)
+        elif choice == 'q':
+            break
+        else:
+            print("Invalid choice.")
+
+
 async def main():
     print_banner()
     mode = choose_mode()
@@ -260,6 +309,8 @@ async def main():
         await run_commoncrawl_mode()
     elif mode == 'searxng':
         await run_searxng_mode()
+    elif mode == 'cleanup':
+        await run_cleanup_mode()
 
     print("\nProgram finished.")
 
