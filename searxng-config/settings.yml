@@ -30,6 +30,8 @@ server:
 ui:
   static_use_hash: true
 
+#outgoing
+
 outgoing:
   request_timeout: 10.0
   max_request_timeout: 15.0
