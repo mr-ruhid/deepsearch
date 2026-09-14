@@ -1,0 +1,112 @@
+[
+  {
+    "id": "f1ff62aa46c173d42221c5d33dc71d0d",
+    "title": "YouTube Help",
+    "description": "Official YouTube Help Center where you can find tips and tutorials on using YouTube and other answers to frequently asked questions.",
+    "url": "https://support.google.com/youtube/?hl=en",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  },
+  {
+    "id": "a88048f1cafa9d37e08a2dac89d4ddb9",
+    "title": "知乎 - 有问题，就会有答案",
+    "description": "知乎是一个中文互联网高质量问答社区和创作者聚集的原创内容平台，致力于分享知识、经验和见解，帮助用户找到答案。",
+    "url": "https://www.zhihu.com/",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  },
+  {
+    "id": "1a7d7079576e1f1436488a61cee03592",
+    "title": "YouTube Creator Awards",
+    "description": "YouTube Creator Awards are our way of recognizing the extraordinary effort creators put into their growing channels and to build …",
+    "url": "https://support.google.com/youtube/answer/7682560?hl=en",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  },
+  {
+    "id": "44c7865cf8d8271ef9a346f6ebc9f2b5",
+    "title": "如何在中国大陆用「合法」的方式观看到youtube上面的 ...",
+    "description": "YouTube 将自动为 添加翻译后的中文字幕，这一功能有效解决了语言障碍问题。 当你向下浏览时，部分 会标注相关信息。 例如，博 …",
+    "url": "https://www.zhihu.com/question/1903231775980913051",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  },
+  {
+    "id": "657bb3c309a9132f4d990a0c1895baad",
+    "title": "Télécharger l'application mobile YouTube",
+    "description": "Téléchargez l'application YouTube pour profiter d'une expérience de visionnage enrichie sur votre appareil mobile. Télécharger …",
+    "url": "https://support.google.com/youtube/answer/3227660?hl=fr&co=GENIE.Platform%3DAndroid",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  },
+  {
+    "id": "c5ce0dacb7b745818d45599de94cd41f",
+    "title": "Get help signing in to YouTube - YouTube Help",
+    "description": "How did you last sign in to your YouTube channel? I signed in with an email address I signed in with a YouTube username",
+    "url": "https://support.google.com/youtube/troubleshooter/3219097?hl=en",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  },
+  {
+    "id": "665c6d7cd06c1de44b2c956601d4d174",
+    "title": "Verify your YouTube account - Google Help",
+    "description": "Verify your YouTube account To verify your channel, you’ll be asked to enter a phone number. We’ll send a verification code by text …",
+    "url": "https://support.google.com/youtube/answer/171664?hl=en",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  },
+  {
+    "id": "f3cd6b28bc687074b93b9bc5146ca5c8",
+    "title": "YouTube チャンネルの作成",
+    "description": "YouTube で Google アカウントとは別の名前を使用したい場合は、チャンネルをブランド アカウントにリンクさせることができま …",
+    "url": "https://support.google.com/youtube/answer/1646861?hl=ja",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  },
+  {
+    "id": "cfb34698936c331fca924652810b5bf0",
+    "title": "Channel or account terminations - YouTube Help",
+    "description": "Open YouTube Studio. View confirmation of your appeal submission, and check your appeal’s anticipated review time. You’ll be …",
+    "url": "https://support.google.com/youtube/answer/2802168?hl=en",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  },
+  {
+    "id": "d9b1e102c7b9fd9806074d727d50e3c8",
+    "title": "Nudity & Sexual Content Policy - YouTube Help",
+    "description": "YouTube also enforces trademark holder rights. Explicit content meant to be sexually gratifying is not allowed on YouTube. Posting …",
+    "url": "https://support.google.com/youtube/answer/2802002?hl=en",
+    "image_url": "https://github.com/mr-ruhid/deepsearch/blob/main/photo/link.png",
+    "tags": [
+      "бесплатный курс"
+    ],
+    "is_new": true
+  }
+]
